@@ -1,4 +1,4 @@
-# PII Redaction Gateway
+# Sentinel
 
 **Production-grade PII redaction system combining NLP-based detection with LLM-powered verification.**
 
@@ -83,7 +83,7 @@ A dual-layer security architecture that automatically detects and redacts Person
 ```bash
 # Clone the repository
 git clone <your-repo-url>
-cd PII-project
+cd sentinel
 
 # Start all services
 docker-compose up --build
@@ -406,7 +406,7 @@ Pre-configured dashboards for:
 ### Project Structure
 
 ```
-PII-project/
+sentinel/
 ├── app/                    # Application code
 │   ├── main.py            # FastAPI endpoints
 │   ├── service.py         # Presidio redaction logic

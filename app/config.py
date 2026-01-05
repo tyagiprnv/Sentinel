@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     few_shot_examples_count: int = 3
 
     # API Configuration
-    api_title: str = "PII Redaction Gateway"
+    api_title: str = "Sentinel - AI-Powered PII Protection"
     api_version: str = "1.0.0"
     api_debug: bool = False
 

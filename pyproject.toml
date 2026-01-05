@@ -1,7 +1,7 @@
 [project]
-name = "pii-project"
+name = "sentinel"
 version = "0.1.0"
-description = "Add your description here"
+description = "AI-powered PII detection and redaction system with dual-layer security"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
