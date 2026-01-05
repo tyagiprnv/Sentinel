@@ -49,7 +49,7 @@ A dual-layer security architecture that automatically detects and redacts Person
        │             ┌──────────────┐               │
        └────────────▶│  Phi-3 LLM   │──────────────┘
                      │  (Ollama)    │  (Purge if leak)
-                     └──────────────┘
+                     └────────────────┘
 ```
 
 ### How It Works
