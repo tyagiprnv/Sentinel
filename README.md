@@ -1,10 +1,5 @@
 # PII Redaction Gateway
 
-[![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/downloads/)
-[![Test Coverage](https://img.shields.io/badge/coverage-97%25-brightgreen.svg)](htmlcov/index.html)
-[![Code Quality](https://img.shields.io/badge/code%20quality-A-brightgreen.svg)](.)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-
 **Production-grade PII redaction system combining NLP-based detection with LLM-powered verification.**
 
 A dual-layer security architecture that automatically detects and redacts Personally Identifiable Information (PII) from text, then validates redaction quality using advanced LLM techniques.
@@ -352,8 +347,6 @@ docs/
 
 # Current Documentation
 ├── CLAUDE.md           - Developer guide for Claude Code
-├── PROGRESS.md         - Transformation progress log
-├── TRANSFORMATION_SUMMARY.md - Portfolio highlights
 └── README.md           - This file
 ```
 
@@ -520,11 +513,6 @@ Contributions welcome! Please:
 
 ---
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
 
 ## 🙏 Acknowledgments
 
