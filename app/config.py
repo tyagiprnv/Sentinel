@@ -4,7 +4,7 @@ Centralized configuration management for PII redaction system.
 Uses pydantic-settings for type-safe configuration with environment variable support.
 """
 from pydantic_settings import BaseSettings
-from typing import Optional
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -39,6 +39,27 @@ class Settings(BaseSettings):
     # Monitoring
     enable_metrics: bool = True
     enable_tracing: bool = False
+
+    # Policy Engine
+    enable_policy_engine: bool = True
+    default_policy_context: str = "general"
+    allow_policy_override: bool = True
+
+    # Healthcare Policy Configuration
+    healthcare_entities: List[str] = [
+        "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "US_SSN",
+        "DATE_TIME", "LOCATION", "IP_ADDRESS"
+    ]
+    healthcare_allow_restore: bool = False
+    healthcare_min_confidence: float = 0.5
+
+    # Finance Policy Configuration
+    finance_entities: List[str] = [
+        "PERSON", "US_SSN", "CREDIT_CARD", "IBAN_CODE",
+        "PHONE_NUMBER", "EMAIL_ADDRESS", "US_BANK_NUMBER", "US_DRIVER_LICENSE"
+    ]
+    finance_allow_restore: bool = False
+    finance_min_confidence: float = 0.6
 
     class Config:
         """Pydantic config."""
