@@ -21,7 +21,7 @@ RESTORE_URL = "http://localhost:8000/restore"
 
 async def run_test():
     async with httpx.AsyncClient(timeout=30.0) as client:
-        print(f"🚀 Starting Stress Test on {len(STRESS_TEST_CASES)} cases...\n")
+        print(f"Starting Stress Test on {len(STRESS_TEST_CASES)} cases...\n")
         
         for i, text in enumerate(STRESS_TEST_CASES):
             print(f"Test Case {i+1}: '{text}'")
@@ -44,9 +44,9 @@ async def run_test():
             restored_text = restore_response.json().get("original_text")
             
             if restored_text == redacted:
-                print("   [Result] ✅ ALERT: Auditor detected a leak and PURGED the record.")
+                print("   [Result] ALERT: Auditor detected a leak and PURGED the record.")
             else:
-                print("   [Result] ℹ️  SAFE: Auditor cleared the redaction.")
+                print("   [Result] SAFE: Auditor cleared the redaction.")
             
             print("-" * 50)
 

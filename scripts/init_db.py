@@ -31,10 +31,10 @@ async def create_initial_api_key(service_name: str = "admin"):
         session.add(api_key)
         await session.commit()
 
-        print(f"\n✅ Created API key for '{service_name}':")
+        print(f"\nCreated API key for '{service_name}':")
         print(f"   API Key: {raw_key}")
         print(f"   Key ID: {api_key.id}")
-        print(f"\n⚠️  IMPORTANT: Save this API key now! It cannot be retrieved later.")
+        print(f"\nIMPORTANT: Save this API key now! It cannot be retrieved later.")
 
         return raw_key
 
@@ -45,7 +45,7 @@ async def main():
 
     # Create tables
     await init_database()
-    print("✅ Database tables created")
+    print("Database tables created")
 
     # Create initial API key
     api_key = await create_initial_api_key()

@@ -38,7 +38,7 @@ app = FastAPI(title="Iron-Clad AI Gateway", version="1.0.0")
 async def startup_event():
     """Initialize database on startup."""
     await init_database()
-    print("✅ Database initialized")
+    print("Database initialized")
 
 
 async def audit_redaction_task(redacted_text: str, token_mapping_keys: list):
@@ -59,11 +59,11 @@ async def audit_redaction_task(redacted_text: str, token_mapping_keys: list):
 
         if result.get("leaked"):
             AUDITOR_LEAK_DETECTIONS.inc() # Update our health dashboard
-            print(f"🚨 SECURITY ALERT: LLM found a leak: {result.get('reason')}")
+            print(f"SECURITY ALERT: LLM found a leak: {result.get('reason')}")
             
             for key in token_mapping_keys:
                 redactor.db.delete(key)
-            print(f"🔒 PURGE COMPLETE: Removed {len(token_mapping_keys)} keys from Redis.")
+            print(f"PURGE COMPLETE: Removed {len(token_mapping_keys)} keys from Redis.")
             
     except Exception as e:
         print(f"Error in background audit: {e}")
