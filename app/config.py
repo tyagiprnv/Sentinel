@@ -45,6 +45,28 @@ class Settings(BaseSettings):
     default_policy_context: str = "general"
     allow_policy_override: bool = True
 
+    # PostgreSQL Configuration
+    postgres_host: str = "postgres"
+    postgres_port: int = 5432
+    postgres_db: str = "sentinel"
+    postgres_user: str = "sentinel"
+    postgres_password: str = "sentinel_password"
+    postgres_echo: bool = False  # SQL query logging
+    postgres_pool_size: int = 5
+    postgres_max_overflow: int = 10
+
+    @property
+    def postgres_url(self) -> str:
+        """Build PostgreSQL connection URL."""
+        return (
+            f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
+            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
+        )
+
+    # Authentication Configuration
+    enable_api_key_auth: bool = True
+    api_key_header: str = "X-API-Key"
+
     # Healthcare Policy Configuration
     healthcare_entities: List[str] = [
         "PERSON", "PHONE_NUMBER", "EMAIL_ADDRESS", "US_SSN",

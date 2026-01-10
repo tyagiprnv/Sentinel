@@ -110,3 +110,53 @@ def environment_vars(monkeypatch):
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("OLLAMA_URL", "http://localhost:11434/api/generate")
     monkeypatch.setenv("OLLAMA_MODEL", "phi3")
+
+
+# Database test fixtures
+
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from app.database import Base, APIKey
+from datetime import datetime, UTC
+import uuid
+
+
+@pytest.fixture
+async def test_db_engine():
+    """In-memory SQLite for tests."""
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
+async def test_db_session(test_db_engine):
+    """Test database session."""
+    async_session_maker_test = async_sessionmaker(
+        test_db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with async_session_maker_test() as session:
+        yield session
+
+
+@pytest.fixture
+async def test_api_key(test_db_session):
+    """Create test API key."""
+    from app.auth import generate_api_key
+
+    raw_key, key_hash = generate_api_key()
+    api_key = APIKey()
+    api_key.id = str(uuid.uuid4())
+    api_key.key_hash = key_hash
+    api_key.service_name = "test_service"
+    api_key.description = "Test key"
+    api_key.revoked = False
+    api_key.created_at = datetime.now(UTC)
+    api_key.usage_count = 0
+
+    test_db_session.add(api_key)
+    await test_db_session.commit()
+    await test_db_session.refresh(api_key)
+
+    return {"raw_key": raw_key, "record": api_key}

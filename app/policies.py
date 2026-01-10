@@ -78,9 +78,9 @@ GENERAL_POLICY = RedactionPolicy(
         "US_BANK_NUMBER"
     ],
     disabled_entities=[],
-    restoration_allowed=True,
+    restoration_allowed=False,
     min_confidence_threshold=0.0,
-    description="General purpose policy - redacts all PII types with restoration allowed"
+    description="General purpose policy - redacts all PII types with restoration disabled by default (opt-in)"
 )
 
 HEALTHCARE_POLICY = RedactionPolicy(
