@@ -21,8 +21,8 @@ Traditional PII redaction tools lack context awareness and compliance flexibilit
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                      FastAPI Gateway                          │
-│            (Authentication + Audit Logging)                   │
+│                      FastAPI Gateway                         │
+│            (Authentication + Audit Logging)                  │
 └──────────────────────────────────────────────────────────────┘
                               │
          ┌────────────────────┼────────────────────┐
