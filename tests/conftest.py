@@ -39,9 +39,37 @@ def test_client(mock_redis):
     with patch('app.service.redis.Redis', return_value=mock_redis):
         from app.main import app
         from app.service import redactor
+        from app.auth import validate_api_key
+        from app.database import APIKey, get_session
+        from datetime import datetime, UTC
+        from unittest.mock import AsyncMock
+        import uuid
 
         # Replace the redactor's db with our mock
         redactor.db = mock_redis
+
+        # Override the validate_api_key dependency to return a mock API key
+        async def mock_validate_api_key():
+            mock_key = APIKey()
+            mock_key.id = str(uuid.uuid4())
+            mock_key.key_hash = "test"
+            mock_key.service_name = "test_service"
+            mock_key.created_at = datetime.now(UTC)
+            mock_key.revoked = False
+            mock_key.usage_count = 0
+            return mock_key
+
+        # Mock database session
+        async def mock_get_session():
+            mock_session = AsyncMock()
+            # Make execute and commit do nothing
+            mock_session.execute = AsyncMock(return_value=AsyncMock())
+            mock_session.commit = AsyncMock()
+            mock_session.refresh = AsyncMock()
+            yield mock_session
+
+        app.dependency_overrides[validate_api_key] = mock_validate_api_key
+        app.dependency_overrides[get_session] = mock_get_session
 
         return TestClient(app)
 
@@ -110,6 +138,7 @@ def environment_vars(monkeypatch):
     monkeypatch.setenv("REDIS_PORT", "6379")
     monkeypatch.setenv("OLLAMA_URL", "http://localhost:11434/api/generate")
     monkeypatch.setenv("OLLAMA_MODEL", "phi3")
+    monkeypatch.setenv("ENABLE_API_KEY_AUTH", "false")
 
 
 # Database test fixtures

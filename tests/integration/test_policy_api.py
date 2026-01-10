@@ -37,7 +37,7 @@ class TestPolicyRedaction:
             # Verify policy was applied
             assert data["policy_applied"] is not None
             assert data["policy_applied"]["context"] == "general"
-            assert data["policy_applied"]["restoration_allowed"] is True
+            assert data["policy_applied"]["restoration_allowed"] is False  # Default is opt-in (False)
 
     def test_redact_with_healthcare_policy(self, test_client):
         """Test redaction with healthcare policy context."""
@@ -186,12 +186,15 @@ class TestRestorationBlocking:
                 )
             )
 
-            # First, redact with general policy
+            # First, redact with general policy and explicitly enable restoration
             redact_response = test_client.post(
                 "/redact",
                 json={
                     "text": "Email is john@example.com",
-                    "policy": {"context": "general"}
+                    "policy": {
+                        "context": "general",
+                        "restoration_allowed": True  # Explicitly enable
+                    }
                 }
             )
 
@@ -200,10 +203,11 @@ class TestRestorationBlocking:
 
             # Now try to restore
             restore_response = test_client.post(
-                f"/restore?redacted_text={redacted_text}"
+                "/restore",
+                json={"redacted_text": redacted_text}
             )
 
-            # Should succeed (general policy allows restoration)
+            # Should succeed (restoration was enabled)
             assert restore_response.status_code == 200
             assert "john@example.com" in restore_response.json()["original_text"]
 
@@ -231,7 +235,8 @@ class TestRestorationBlocking:
 
             # Now try to restore
             restore_response = test_client.post(
-                f"/restore?redacted_text={redacted_text}"
+                "/restore",
+                json={"redacted_text": redacted_text}
             )
 
             # Should be blocked (healthcare policy forbids restoration)
@@ -264,7 +269,8 @@ class TestRestorationBlocking:
             if "[REDACTED_" in redacted_text:
                 # Now try to restore
                 restore_response = test_client.post(
-                    f"/restore?redacted_text={redacted_text}"
+                    "/restore",
+                    json={"redacted_text": redacted_text}
                 )
 
                 # Should be blocked (finance policy forbids restoration)
@@ -297,7 +303,8 @@ class TestRestorationBlocking:
 
             # Restoration should succeed
             restore_response = test_client.post(
-                f"/restore?redacted_text={redacted_text}"
+                "/restore",
+                json={"redacted_text": redacted_text}
             )
 
             assert restore_response.status_code == 200

@@ -58,15 +58,19 @@ class VerificationAgent:
                 )
 
                 if response.status_code == 200:
+                    # Return the JSON response string (will be parsed by caller)
                     return response.json().get("response")
                 else:
-                    # Return safe default on error
-                    return {"leaked": False, "error": f"HTTP {response.status_code}"}
+                    # Return safe default on error as JSON string for consistency
+                    import json
+                    return json.dumps({"leaked": False, "error": f"HTTP {response.status_code}"})
 
             except httpx.TimeoutException:
-                return {"leaked": False, "error": "Timeout waiting for LLM response"}
+                import json
+                return json.dumps({"leaked": False, "error": "Timeout waiting for LLM response"})
             except Exception as e:
-                return {"leaked": False, "error": str(e)}
+                import json
+                return json.dumps({"leaked": False, "error": str(e)})
 
 
 # Global verifier instance

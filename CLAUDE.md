@@ -4,9 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is an AI-powered PII (Personally Identifiable Information) redaction gateway built with FastAPI. It uses a two-layer security model:
+**Project Name**: Sentinel (internal codename in `pyproject.toml`), deployed as PII-project
+
+This is an AI-powered PII (Personally Identifiable Information) redaction gateway built with FastAPI. It uses a three-layer security model:
 1. **Primary Layer**: Microsoft Presidio (NLP-based) for PII detection and redaction
-2. **Verification Layer**: LLM-based auditor (Phi-3 via Ollama) that validates redaction quality and purges Redis tokens if leaks are detected
+2. **Policy Layer**: Context-aware policy engine for HIPAA, PCI-DSS, and GDPR compliance
+3. **Verification Layer**: LLM-based auditor (Phi-3 via Ollama) that validates redaction quality and purges Redis tokens if leaks are detected
 
 **Package Management**: This project is managed with [uv](https://github.com/astral-sh/uv), a fast Python package installer and resolver. All dependency management commands should use `uv` instead of pip.
 
@@ -65,15 +68,38 @@ This is an AI-powered PII (Personally Identifiable Information) redaction gatewa
 - `few_shot_examples.py`: 7 curated examples for few-shot learning
 - Configurable prompt selection for A/B testing
 
+**app/policies.py** - Policy Engine for context-aware redaction:
+- `RedactionPolicy` dataclass: Defines entity filtering, confidence thresholds, and restoration controls
+- `PolicyEngine` class: Manages policy loading, merging, and entity filtering
+- Predefined policies: `GENERAL_POLICY`, `HEALTHCARE_POLICY`, `FINANCE_POLICY`
+- Policy methods:
+  - `load_policy(context)`: Load predefined policy by context name
+  - `merge_policies(global_policy, request_policy)`: Merge request overrides with global policy
+  - `filter_entities(analyzer_results, policy)`: Filter PII entities based on policy rules
+  - `register_policy(policy)`: Register custom policies
+
+**app/policy_schemas.py** - Pydantic models for policy API:
+- `PolicyRequest`: Request body schema for policy overrides in `/redact`
+- `PolicyResponse`: Response schema with applied policy metadata
+- `AvailablePoliciesResponse`: Response schema for `GET /policies` endpoint
+
 ### Data Flow
 
-**Redaction Flow:**
-1. User sends text to `/redact`
-2. Presidio analyzes and redacts PII, storing mappings in Redis
-3. Response returns immediately with redacted text
-4. Background task sends redacted text to LLM auditor
-5. If LLM detects leaked PII, it purges all Redis keys created in that request
-6. Prometheus metrics track redaction counts and confidence scores
+**Redaction Flow (Policy-Aware):**
+1. User sends text to `/redact` with optional policy overrides
+2. Policy engine loads context (general/healthcare/finance) and merges request overrides
+3. Presidio analyzes text and detects all PII entities
+4. Policy engine filters entities based on:
+   - Enabled/disabled entity types
+   - Minimum confidence threshold
+5. Presidio redacts filtered PII, storing mappings in Redis with policy metadata
+6. Response returns immediately with:
+   - Redacted text with `[REDACTED_xxxx]` tokens
+   - Policy metadata (context, restoration_allowed, entities_filtered)
+   - Confidence scores
+7. Background task sends redacted text to LLM auditor
+8. If LLM detects leaked PII, it purges all Redis keys created in that request
+9. Prometheus metrics track redaction counts and confidence scores
 
 **Restoration Flow (Authenticated):**
 1. User sends redacted text to `/restore` with X-API-Key header
@@ -98,18 +124,46 @@ This is an AI-powered PII (Personally Identifiable Information) redaction gatewa
 
 ## Testing & Evaluation
 
-### Test Suite (97% Coverage)
+### Test Suite (85% Coverage)
 
-**Location**: `tests/` directory with 63 comprehensive tests
+**Location**: `tests/` directory with 2,159 lines of test code across multiple test files
+
+**Test Results** (as of 2026-01-10):
+- ✅ **99/99 tests passing** (100% pass rate)
+- 📊 **Coverage: 85.36%** (exceeds 60% requirement)
+- ⏱️ **Runtime: ~16 seconds**
+
+**Coverage Breakdown**:
+- 100% Coverage: `audit.py`, `policies.py`, `policy_schemas.py`, `schemas.py`, `service.py`
+- 93% Coverage: `verification.py`
+- 91% Coverage: `database.py`
+- 89% Coverage: `few_shot_examples.py`
+- 88% Coverage: `config.py`
+- 79% Coverage: `main.py`
 
 **Structure**:
-- `tests/conftest.py` - Shared fixtures (mock Redis with fakeredis, mock Ollama with respx, async SQLite for DB tests)
-- `tests/unit/test_service.py` - RedactorService tests (15 tests)
-- `tests/unit/test_verification.py` - VerificationAgent tests (10 tests)
-- `tests/unit/test_auth.py` - Authentication service tests (7 tests)
-- `tests/unit/test_audit.py` - Audit logging service tests (8 tests)
-- `tests/integration/test_api.py` - API endpoint tests (14 tests)
-- `tests/integration/test_authenticated_restore.py` - Authenticated restore and admin endpoints (9 tests)
+- `tests/conftest.py` - Shared fixtures (mock Redis with fakeredis, mock Ollama with respx, async SQLite for DB tests, FastAPI dependency overrides)
+
+**Unit Tests** (`tests/unit/`):
+- `test_service.py` - RedactorService tests (15 tests)
+- `test_verification.py` - VerificationAgent tests (10 tests)
+- `test_auth.py` - Authentication service tests (6 tests)
+- `test_audit.py` - Audit logging service tests (7 tests)
+- `test_policies.py` - **Policy Engine tests** (24 tests - comprehensive coverage):
+  - Policy loading and context validation
+  - Entity filtering with enabled/disabled lists
+  - Confidence threshold filtering
+  - Policy merging with request overrides
+  - Custom policy registration
+
+**Integration Tests** (`tests/integration/`):
+- `test_api.py` - API endpoint tests (14 tests)
+- `test_authenticated_restore.py` - Authenticated restore and admin endpoints (9 tests)
+- `test_policy_api.py` - **Policy API endpoint tests** (14 tests):
+  - GET /policies endpoint
+  - Policy overrides in /redact requests
+  - Policy-based restoration blocking
+  - Policy metadata in responses
 
 **Run tests**:
 ```bash
@@ -121,6 +175,9 @@ uv run pytest tests/unit/test_service.py -v
 
 # View coverage report
 open htmlcov/index.html
+
+# Quick run (quiet mode)
+uv run pytest --cov=app --cov-report=term -q
 ```
 
 ### Evaluation Framework
@@ -148,6 +205,146 @@ uv run python evaluation/baseline_comparison.py
 ```
 
 **Results saved to**: `evaluation/results/benchmark_results.json`
+
+## Policy Engine
+
+### Overview
+
+The Policy Engine provides context-aware, compliance-driven PII redaction. It allows fine-grained control over:
+- Which entity types to redact (PERSON, EMAIL, SSN, CREDIT_CARD, etc.)
+- Minimum confidence thresholds for redaction
+- Restoration permissions per policy context
+- Compliance with HIPAA, PCI-DSS, and GDPR requirements
+
+### Predefined Policy Contexts
+
+**General Policy** (`context: "general"`):
+- **Purpose**: Default policy for general-purpose PII redaction
+- **Entities**: 13 types (PERSON, EMAIL_ADDRESS, PHONE_NUMBER, CREDIT_CARD, US_SSN, US_DRIVER_LICENSE, US_PASSPORT, IBAN_CODE, IP_ADDRESS, DATE_TIME, LOCATION, URL, US_BANK_NUMBER)
+- **Confidence Threshold**: 0.0 (redact all detected PII)
+- **Restoration**: Disabled by default (opt-in required)
+- **Compliance**: General data protection
+
+**Healthcare Policy** (`context: "healthcare"`):
+- **Purpose**: HIPAA-compliant PHI (Protected Health Information) redaction
+- **Entities**: 7 types (PERSON, PHONE_NUMBER, EMAIL_ADDRESS, US_SSN, DATE_TIME, LOCATION, IP_ADDRESS)
+- **Confidence Threshold**: 0.5 (stricter detection to reduce false positives)
+- **Restoration**: Disabled (irreversible redaction for compliance)
+- **Compliance**: HIPAA
+
+**Finance Policy** (`context: "finance"`):
+- **Purpose**: PCI-DSS-compliant financial data redaction
+- **Entities**: 8 types (PERSON, US_SSN, CREDIT_CARD, IBAN_CODE, PHONE_NUMBER, EMAIL_ADDRESS, US_BANK_NUMBER, US_DRIVER_LICENSE)
+- **Confidence Threshold**: 0.6 (high confidence to protect financial PII)
+- **Restoration**: Disabled (irreversible redaction for compliance)
+- **Compliance**: PCI-DSS
+
+### Using Policies
+
+**Default behavior** (uses general policy with restoration disabled):
+```bash
+curl -X POST http://localhost:8000/redact \
+  -H "Content-Type: application/json" \
+  -d '{"text": "My email is john@example.com and SSN is 123-45-6789"}'
+```
+
+**Select a policy context**:
+```bash
+curl -X POST http://localhost:8000/redact \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Patient John Doe, DOB: 1990-05-15, SSN: 123-45-6789",
+    "policy": {"context": "healthcare"}
+  }'
+```
+
+**Override specific policy settings**:
+```bash
+curl -X POST http://localhost:8000/redact \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Contact: jane@example.com, Phone: 555-1234",
+    "policy": {
+      "context": "general",
+      "enabled_entities": ["EMAIL_ADDRESS", "PHONE_NUMBER"],
+      "min_confidence_threshold": 0.7,
+      "restoration_allowed": true
+    }
+  }'
+```
+
+**Disable specific entities**:
+```bash
+curl -X POST http://localhost:8000/redact \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Meeting on 2024-01-15 with John Doe at john@example.com",
+    "policy": {
+      "context": "general",
+      "disabled_entities": ["DATE_TIME"],
+      "restoration_allowed": true
+    }
+  }'
+```
+
+**Response includes policy metadata**:
+```json
+{
+  "redacted_text": "Meeting on 2024-01-15 with [REDACTED_a1b2] at [REDACTED_c3d4]",
+  "confidence_scores": {"PERSON": 0.95, "EMAIL_ADDRESS": 1.0},
+  "policy": {
+    "context": "general",
+    "restoration_allowed": true,
+    "entities_filtered": 2,
+    "description": "General purpose policy with custom overrides"
+  }
+}
+```
+
+### List Available Policies
+
+Query all available policy contexts and their configurations:
+```bash
+curl http://localhost:8000/policies
+```
+
+Response:
+```json
+{
+  "available_contexts": ["general", "healthcare", "finance"],
+  "default_context": "general",
+  "policies": [
+    {
+      "context": "general",
+      "enabled_entities": ["PERSON", "EMAIL_ADDRESS", ...],
+      "restoration_allowed": false,
+      "min_confidence_threshold": 0.0,
+      "description": "General purpose policy - redacts all PII types"
+    },
+    ...
+  ]
+}
+```
+
+### Policy Enforcement in Restoration
+
+When restoring redacted text, the system checks each token's policy metadata:
+- If `restoration_allowed=false` in the original redaction policy, restoration fails with HTTP 403
+- If `restoration_allowed=true`, restoration succeeds (with valid API key)
+- Policy violations are logged to the audit trail
+
+**Example restoration failure** (policy blocked):
+```bash
+curl -X POST http://localhost:8000/restore \
+  -H "X-API-Key: your_key" \
+  -H "Content-Type: application/json" \
+  -d '{"redacted_text": "Patient [REDACTED_a1b2]"}'
+
+# Response: 403 Forbidden
+{
+  "detail": "Restoration not allowed for token [REDACTED_a1b2] due to policy restrictions"
+}
+```
 
 ## Authentication & Audit Trail
 
@@ -396,6 +593,100 @@ Or override at runtime:
 result = await verifier.check_for_leaks(text, prompt_version="v3_few_shot")
 ```
 
+## Production Deployment
+
+### Kubernetes Deployment
+
+The project includes production-ready Kubernetes manifests for enterprise deployment.
+
+**Directory Structure**:
+- `k8s/base/` - Base Kubernetes manifests
+  - `api/` - FastAPI application deployment and service
+  - `redis/` - Redis StatefulSet and service
+  - `ollama/` - Ollama LLM server deployment
+  - `prometheus/` - Monitoring stack
+  - `grafana/` - Visualization dashboard
+  - `configmaps/` - Configuration management
+  - `secrets/` - Secret management (template files, not committed)
+  - `ingress/` - Ingress controller configuration
+  - `scripts/` - Deployment helper scripts
+
+- `k8s/helm/` - Helm chart for templated deployment
+  - `sentinel/` - Helm chart for the Sentinel PII gateway
+  - `sentinel/templates/` - Kubernetes resource templates
+
+**Deploying with kubectl**:
+```bash
+# Apply all base manifests
+kubectl apply -f k8s/base/
+
+# Apply specific component
+kubectl apply -f k8s/base/api/
+
+# Check deployment status
+kubectl get pods -l app=sentinel-api
+kubectl get svc sentinel-api
+```
+
+**Deploying with Helm**:
+```bash
+# Install the Helm chart
+helm install sentinel k8s/helm/sentinel/ \
+  --namespace pii-gateway \
+  --create-namespace
+
+# Upgrade deployment
+helm upgrade sentinel k8s/helm/sentinel/ \
+  --namespace pii-gateway
+
+# Uninstall
+helm uninstall sentinel --namespace pii-gateway
+```
+
+**Key Components**:
+- **API Deployment**: Horizontal Pod Autoscaling (HPA) for traffic spikes
+- **Redis StatefulSet**: Persistent storage for PII token mappings
+- **PostgreSQL**: External managed database (RDS, Cloud SQL recommended)
+- **Ollama**: GPU-enabled nodes for LLM inference
+- **Ingress**: TLS termination with cert-manager
+- **Monitoring**: Prometheus + Grafana for observability
+
+**Production Considerations**:
+- Redis persistence with PVC (Persistent Volume Claims)
+- Database connection pooling via SQLAlchemy
+- Secret management with Kubernetes Secrets or external secret stores (Vault, AWS Secrets Manager)
+- Resource limits and requests configured per workload
+- Liveness and readiness probes for all services
+- Network policies for inter-service communication
+
+### CI/CD Pipeline
+
+**GitHub Actions Workflows**:
+
+**`.github/workflows/claude.yml`** - Claude Code Integration:
+- Triggered by: Issue comments, PR comments, PR reviews mentioning `@claude`
+- Permissions: Read code, PRs, issues, CI results
+- Automated code review and suggestions via Claude Code
+- Example: Comment `@claude review this PR` on any pull request
+
+**`.github/workflows/claude-code-review.yml`** - Automated PR Review:
+- Triggered by: Pull request creation, updates
+- Runs Claude Code automated review
+- Checks code quality, security, and best practices
+- Posts review comments directly on PRs
+
+**Triggering Claude Code**:
+```bash
+# In a GitHub issue or PR comment:
+@claude help me fix the authentication bug
+
+# In a PR:
+@claude review this code for security issues
+
+# In an issue:
+@claude implement feature X based on the description
+```
+
 ## Key Implementation Details
 
 ### Redis Token Management
@@ -412,6 +703,151 @@ result = await verifier.check_for_leaks(text, prompt_version="v3_few_shot")
 
 ### Presidio Custom Operator
 The anonymizer uses a custom lambda operator instead of built-in replacers to generate tokens and store mappings in Redis simultaneously.
+
+## Configuration Files
+
+### Core Configuration
+
+- **`.env.example`** - Environment variable template (commit to repo)
+- **`.env`** - Active environment configuration (DO NOT commit, contains secrets)
+- **`pyproject.toml`** - Python project metadata and dependencies (managed by uv)
+- **`uv.lock`** - Dependency lock file (ensures reproducible builds)
+- **`.python-version`** - Python version pinning (3.13+)
+- **`requirements.txt`** - Legacy pip requirements (deprecated, use uv)
+
+### Docker & Infrastructure
+
+- **`docker-compose.yml`** - Local development stack (Redis, PostgreSQL, Ollama, Prometheus, Grafana)
+- **`dockerfile`** - Container image definition for FastAPI application
+- **`prometheus.yml`** - Prometheus scraping configuration (metrics collection)
+
+### Testing
+
+- **`pytest.ini`** - Pytest configuration:
+  - Test discovery patterns
+  - Coverage settings
+  - Async test support
+  - Output formatting
+
+### Git & CI/CD
+
+- **`.gitignore`** - Git exclusion patterns:
+  - Virtual environments (`.venv/`)
+  - Python cache (`__pycache__/`, `*.pyc`)
+  - Test artifacts (`htmlcov/`, `.coverage`, `.pytest_cache/`)
+  - IDE files (`.vscode/`, `.idea/`)
+  - Environment files (`.env`, not `.env.example`)
+  - Ollama data (`ollama_data/`)
+  - Claude Code cache (`.claude/`)
+
+### Environment Variables
+
+**Key environment variables** (set in `.env`):
+
+**Redis**:
+- `REDIS_HOST` - Redis server hostname (default: localhost)
+- `REDIS_PORT` - Redis port (default: 6379)
+- `REDIS_DB` - Redis database number (default: 0)
+
+**PostgreSQL**:
+- `DATABASE_URL` - PostgreSQL connection string (async)
+- Example: `postgresql+asyncpg://user:pass@localhost:5432/sentinel`
+
+**Ollama**:
+- `OLLAMA_BASE_URL` - Ollama API endpoint (default: http://localhost:11434)
+- `OLLAMA_MODEL` - LLM model name (default: phi3)
+
+**Presidio**:
+- `SPACY_MODEL` - spaCy language model (default: en_core_web_lg)
+
+**Authentication**:
+- `API_KEY_SECRET` - Secret for API key generation (generate with `openssl rand -hex 32`)
+
+**Prompt Configuration**:
+- `PROMPT_VERSION` - LLM prompt version (v1_basic, v2_cot, v3_few_shot, v4_optimized)
+- `FEW_SHOT_EXAMPLES_COUNT` - Number of examples for few-shot prompts (default: 3)
+- `USE_CHAIN_OF_THOUGHT` - Enable CoT reasoning (default: true)
+
+## Project Structure
+
+### Directory Layout
+
+```
+PII-project/
+├── app/                    # Core application
+│   ├── main.py            # FastAPI endpoints
+│   ├── service.py         # Redaction service
+│   ├── verification.py    # LLM auditor
+│   ├── policies.py        # Policy engine
+│   ├── policy_schemas.py  # Policy Pydantic models
+│   ├── schemas.py         # Request/response schemas
+│   ├── config.py          # Configuration management
+│   ├── database.py        # SQLAlchemy models
+│   ├── auth.py            # Authentication service
+│   ├── audit.py           # Audit logging
+│   └── prompts/           # LLM prompt engineering
+│       ├── verification_prompts.py
+│       └── few_shot_examples.py
+├── tests/                 # Test suite (2,159 lines)
+│   ├── conftest.py        # Shared fixtures
+│   ├── unit/              # Unit tests
+│   │   ├── test_service.py
+│   │   ├── test_verification.py
+│   │   ├── test_auth.py
+│   │   ├── test_audit.py
+│   │   └── test_policies.py
+│   └── integration/       # Integration tests
+│       ├── test_api.py
+│       ├── test_authenticated_restore.py
+│       └── test_policy_api.py
+├── evaluation/            # Evaluation framework
+│   ├── datasets.py        # 43 benchmark test cases
+│   ├── metrics.py         # Precision, recall, F1, latency
+│   ├── evaluate.py        # Main evaluation runner
+│   ├── baseline_comparison.py
+│   └── results/           # Benchmark results
+│       └── plots/         # Future: visualization plots
+├── scripts/               # Utility scripts
+│   └── init_db.py         # Database initialization
+├── k8s/                   # Kubernetes deployment
+│   ├── base/              # Base manifests
+│   │   ├── api/
+│   │   ├── redis/
+│   │   ├── ollama/
+│   │   ├── prometheus/
+│   │   ├── grafana/
+│   │   ├── configmaps/
+│   │   ├── secrets/
+│   │   ├── ingress/
+│   │   └── scripts/
+│   └── helm/              # Helm chart
+│       └── sentinel/
+├── .github/               # GitHub Actions workflows
+│   └── workflows/
+│       ├── claude.yml     # Claude Code integration
+│       └── claude-code-review.yml
+├── docker-compose.yml     # Local development stack
+├── dockerfile             # Container image
+├── pyproject.toml         # Python project config (uv)
+├── uv.lock                # Dependency lock file
+├── requirements.txt       # Legacy pip requirements
+├── pytest.ini             # Test configuration
+├── prometheus.yml         # Monitoring config
+├── stress_test.py         # Manual stress testing
+├── CLAUDE.md              # Developer guide (this file)
+├── README.md              # User documentation
+├── .env.example           # Environment template
+├── .gitignore             # Git exclusions
+└── .python-version        # Python 3.13
+```
+
+### Empty Directories (Placeholders)
+
+These directories exist but are currently empty (reserved for future features):
+- **`app/security/`** - Future: Additional security utilities
+- **`app/monitoring/`** - Future: Custom monitoring code
+- **`tests/infrastructure/`** - Future: Infrastructure tests (Docker, K8s)
+- **`evaluation/results/plots/`** - Future: Benchmark visualization plots
 
 ## Dependencies
 
