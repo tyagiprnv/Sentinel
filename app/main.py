@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import FastAPI, Response, BackgroundTasks, HTTPException, Depends, Request
 from app.schemas import (
     RedactRequest, RedactResponse, RestoreRequest, RestoreResponse,
