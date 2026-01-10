@@ -12,8 +12,16 @@ class TestVerificationAgent:
     """Test suite for VerificationAgent."""
 
     @pytest.fixture
-    def verification_agent(self):
-        """Create a VerificationAgent instance."""
+    def verification_agent(self, monkeypatch):
+        """Create a VerificationAgent instance with test settings."""
+        # Set test environment variables
+        monkeypatch.setenv("OLLAMA_URL", "http://ollama:11434/api/generate")
+        monkeypatch.setenv("OLLAMA_MODEL", "phi3")
+
+        # Reload settings to pick up env vars
+        from app.config import reload_settings
+        reload_settings()
+
         return VerificationAgent()
 
     @pytest.mark.asyncio
@@ -141,10 +149,13 @@ class TestVerificationAgent:
                 return_value=Response(500, json={"error": "Internal server error"})
             )
 
-            result = await verification_agent.check_for_leaks(redacted_text)
+            result_raw = await verification_agent.check_for_leaks(redacted_text)
 
-            # Should handle gracefully (returns dict with error or None)
-            assert result is None or (isinstance(result, dict) and ("error" in result or result.get("leaked") is False))
+            # Should handle gracefully (returns JSON string with error)
+            assert result_raw is not None
+            if isinstance(result_raw, str):
+                result = json.loads(result_raw)
+                assert "error" in result or result.get("leaked") is False
 
     @pytest.mark.asyncio
     async def test_prompt_contains_text(self, verification_agent):

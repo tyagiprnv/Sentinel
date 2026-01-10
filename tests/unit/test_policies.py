@@ -104,7 +104,7 @@ class TestPolicyEngine:
         policy = engine.load_policy("general")
 
         assert policy.context == "general"
-        assert policy.restoration_allowed is True
+        assert policy.restoration_allowed is False  # Default is opt-in (False)
         assert len(policy.enabled_entities) > 0
 
     def test_load_policy_healthcare(self):
@@ -323,7 +323,7 @@ class TestPredefinedPolicies:
     def test_general_policy_configuration(self):
         """Test general policy has expected configuration."""
         assert GENERAL_POLICY.context == "general"
-        assert GENERAL_POLICY.restoration_allowed is True
+        assert GENERAL_POLICY.restoration_allowed is False  # Opt-in by default
         assert GENERAL_POLICY.min_confidence_threshold == 0.0
         assert len(GENERAL_POLICY.enabled_entities) > 0
 

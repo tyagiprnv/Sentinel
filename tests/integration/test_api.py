@@ -161,10 +161,13 @@ class TestRestoreEndpoint:
                 )
             )
 
-            # First redact some text
+            # First redact some text with restoration enabled
             redact_response = test_client.post(
                 "/redact",
-                json={"text": "Contact john@example.com"}
+                json={
+                    "text": "Contact john@example.com",
+                    "policy": {"restoration_allowed": True}
+                }
             )
 
             assert redact_response.status_code == 200
@@ -172,7 +175,8 @@ class TestRestoreEndpoint:
 
             # Now restore it
             restore_response = test_client.post(
-                f"/restore?redacted_text={redacted_text}"
+                "/restore",
+                json={"redacted_text": redacted_text}
             )
 
             assert restore_response.status_code == 200
@@ -185,7 +189,8 @@ class TestRestoreEndpoint:
     def test_restore_endpoint_missing_keys(self, test_client):
         """Test restore with non-existent Redis keys."""
         response = test_client.post(
-            "/restore?redacted_text=Contact [REDACTED_xxxx] for info"
+            "/restore",
+            json={"redacted_text": "Contact [REDACTED_xxxx] for info"}
         )
 
         assert response.status_code == 200
@@ -196,7 +201,10 @@ class TestRestoreEndpoint:
 
     def test_restore_endpoint_empty_text(self, test_client):
         """Test restore with empty text."""
-        response = test_client.post("/restore?redacted_text=")
+        response = test_client.post(
+            "/restore",
+            json={"redacted_text": ""}
+        )
 
         assert response.status_code == 200
         data = response.json()
@@ -259,10 +267,13 @@ class TestEndToEndFlow:
 
             original_text = "My email is alice@example.com and phone is 555-9876"
 
-            # Step 1: Redact
+            # Step 1: Redact with restoration enabled
             redact_response = test_client.post(
                 "/redact",
-                json={"text": original_text}
+                json={
+                    "text": original_text,
+                    "policy": {"restoration_allowed": True}
+                }
             )
 
             assert redact_response.status_code == 200
@@ -276,7 +287,8 @@ class TestEndToEndFlow:
 
             # Step 2: Restore
             restore_response = test_client.post(
-                f"/restore?redacted_text={redacted_text}"
+                "/restore",
+                json={"redacted_text": redacted_text}
             )
 
             assert restore_response.status_code == 200
