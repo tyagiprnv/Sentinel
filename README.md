@@ -15,6 +15,68 @@ Traditional PII redaction tools lack context awareness and compliance flexibilit
 - **Production Security**: API key authentication, immutable audit logs, policy-based restoration controls
 - **Battle-Tested**: 85% test coverage across 99 tests, 43-case benchmark suite
 
+The design choices behind Sentinel reflect real-world constraints around compliance, reliability, and operational simplicity.
+
+---
+
+## Engineering Tradeoffs & Design Decisions
+
+Sentinel was built as a practical, production-oriented PII redaction gateway. The goal is reliable and explainable behavior rather than fully automated or experimental compliance.
+
+### Why Presidio for Primary Detection
+
+Presidio is used as the primary PII detection layer instead of LLM-based extraction or custom NER models because:
+
+- It produces predictable, deterministic outputs with confidence scores
+- Its entity types align well with common compliance requirements (HIPAA, PCI-DSS, GDPR)
+- It runs locally, keeping latency low and operational complexity manageable
+
+LLMs are intentionally not used for primary detection due to their non-deterministic behavior and higher cost.
+
+---
+
+### Why LLM Auditing Is Limited
+
+The LLM is used only as a secondary verification step, not as a decision-maker.
+
+- It cannot add or remove redactions
+- If uncertainty or leakage is detected, the system defaults to stricter redaction
+- It operates on already-redacted text when possible to reduce PII exposure
+
+This limits risk while still catching context-dependent edge cases.
+
+---
+
+### Known Limitations and Tradeoffs
+
+Some problems were intentionally left out of scope:
+
+- No deep semantic inference from indirect or narrative context
+- No human approval or dual-control workflows for restoration
+- Policies encode technical rules, not legal interpretation
+- Only text inputs are supported (no PDFs, images, or scans)
+
+These tradeoffs keep the system simpler and easier to reason about.
+
+---
+
+### Scaling Considerations
+
+At higher traffic levels, Sentinel would require:
+
+- Selective LLM auditing for higher-risk requests only
+- Caching of policy evaluations
+- Asynchronous or event-driven verification at larger scale
+- Basic monitoring for shifts in entity confidence or volume
+
+These optimizations were deferred to keep the reference implementation focused and understandable.
+
+---
+
+### Design Philosophy
+
+Sentinel prioritizes predictable behavior, clear policy control, and secure defaults over aggressive automation.
+
 ---
 
 ## Three-Layer Security Architecture
