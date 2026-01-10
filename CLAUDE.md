@@ -593,73 +593,7 @@ Or override at runtime:
 result = await verifier.check_for_leaks(text, prompt_version="v3_few_shot")
 ```
 
-## Production Deployment
-
-### Kubernetes Deployment
-
-The project includes production-ready Kubernetes manifests for enterprise deployment.
-
-**Directory Structure**:
-- `k8s/base/` - Base Kubernetes manifests
-  - `api/` - FastAPI application deployment and service
-  - `redis/` - Redis StatefulSet and service
-  - `ollama/` - Ollama LLM server deployment
-  - `prometheus/` - Monitoring stack
-  - `grafana/` - Visualization dashboard
-  - `configmaps/` - Configuration management
-  - `secrets/` - Secret management (template files, not committed)
-  - `ingress/` - Ingress controller configuration
-  - `scripts/` - Deployment helper scripts
-
-- `k8s/helm/` - Helm chart for templated deployment
-  - `sentinel/` - Helm chart for the Sentinel PII gateway
-  - `sentinel/templates/` - Kubernetes resource templates
-
-**Deploying with kubectl**:
-```bash
-# Apply all base manifests
-kubectl apply -f k8s/base/
-
-# Apply specific component
-kubectl apply -f k8s/base/api/
-
-# Check deployment status
-kubectl get pods -l app=sentinel-api
-kubectl get svc sentinel-api
-```
-
-**Deploying with Helm**:
-```bash
-# Install the Helm chart
-helm install sentinel k8s/helm/sentinel/ \
-  --namespace pii-gateway \
-  --create-namespace
-
-# Upgrade deployment
-helm upgrade sentinel k8s/helm/sentinel/ \
-  --namespace pii-gateway
-
-# Uninstall
-helm uninstall sentinel --namespace pii-gateway
-```
-
-**Key Components**:
-- **API Deployment**: Horizontal Pod Autoscaling (HPA) for traffic spikes
-- **Redis StatefulSet**: Persistent storage for PII token mappings
-- **PostgreSQL**: External managed database (RDS, Cloud SQL recommended)
-- **Ollama**: GPU-enabled nodes for LLM inference
-- **Ingress**: TLS termination with cert-manager
-- **Monitoring**: Prometheus + Grafana for observability
-
-**Production Considerations**:
-- Redis persistence with PVC (Persistent Volume Claims)
-- Database connection pooling via SQLAlchemy
-- Secret management with Kubernetes Secrets or external secret stores (Vault, AWS Secrets Manager)
-- Resource limits and requests configured per workload
-- Liveness and readiness probes for all services
-- Network policies for inter-service communication
-
-### CI/CD Pipeline
+## CI/CD Pipeline
 
 **GitHub Actions Workflows**:
 
@@ -809,19 +743,6 @@ PII-project/
 │       └── plots/         # Future: visualization plots
 ├── scripts/               # Utility scripts
 │   └── init_db.py         # Database initialization
-├── k8s/                   # Kubernetes deployment
-│   ├── base/              # Base manifests
-│   │   ├── api/
-│   │   ├── redis/
-│   │   ├── ollama/
-│   │   ├── prometheus/
-│   │   ├── grafana/
-│   │   ├── configmaps/
-│   │   ├── secrets/
-│   │   ├── ingress/
-│   │   └── scripts/
-│   └── helm/              # Helm chart
-│       └── sentinel/
 ├── .github/               # GitHub Actions workflows
 │   └── workflows/
 │       ├── claude.yml     # Claude Code integration
@@ -846,7 +767,7 @@ PII-project/
 These directories exist but are currently empty (reserved for future features):
 - **`app/security/`** - Future: Additional security utilities
 - **`app/monitoring/`** - Future: Custom monitoring code
-- **`tests/infrastructure/`** - Future: Infrastructure tests (Docker, K8s)
+- **`tests/infrastructure/`** - Future: Infrastructure tests (Docker)
 - **`evaluation/results/plots/`** - Future: Benchmark visualization plots
 
 ## Dependencies
