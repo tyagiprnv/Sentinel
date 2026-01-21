@@ -28,3 +28,6 @@ htmlcov/
 # Database
 *.db
 *.sqlite
+
+analysis.txt
+utility.txt
