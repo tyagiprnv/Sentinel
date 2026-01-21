@@ -4,7 +4,7 @@ Database configuration and models for authentication and audit logging.
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import String, DateTime, Boolean, Integer, Text
-from datetime import datetime
+from datetime import datetime, UTC
 import uuid
 from typing import AsyncGenerator, Optional
 from app.config import get_settings
@@ -29,7 +29,7 @@ class APIKey(Base):
     key_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False, index=True)
     service_name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))  # Issue 12 fix
     revoked: Mapped[bool] = mapped_column(Boolean, default=False)
     revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -58,7 +58,7 @@ class RestorationAuditLog(Base):
     service_name: Mapped[str] = mapped_column(String(255), nullable=False)
     timestamp: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
+        default=lambda: datetime.now(UTC),  # Issue 12 fix
         index=True
     )
     redacted_text: Mapped[str] = mapped_column(Text, nullable=False)
