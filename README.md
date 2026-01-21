@@ -22,7 +22,7 @@ The design choices behind Sentinel reflect real-world constraints around complia
 ## Recent Improvements
 
 **Security & Reliability**:
-- Token collision prevention: 16-character tokens (was 4-char) for 18.4 quintillion unique combinations
+- Token collision prevention: 16-character tokens for 18.4 quintillion unique combinations
 - Missing token tracking: Restore endpoint now reports warnings for expired/missing tokens
 - Robust error handling: Specific exception types for timeout, connection, and Redis errors
 - Configuration-based connections: Redis settings now use environment variables
