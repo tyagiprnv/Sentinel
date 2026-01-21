@@ -13,6 +13,7 @@ from app.config import get_settings
 from app.database import get_session, init_database, APIKey as APIKeyModel
 from app.auth import validate_api_key, generate_api_key
 from app.audit import log_restoration_request, get_audit_logs
+from app.logging_config import get_logger
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
 from prometheus_client import Counter, Histogram, generate_latest, CONTENT_TYPE_LATEST
@@ -20,6 +21,11 @@ from datetime import datetime, UTC
 import uuid
 import json
 import re
+import httpx
+import redis
+
+# Initialize logger (Issue 9)
+logger = get_logger("api")
 
 # Initialize policy engine
 policy_engine = PolicyEngine()
@@ -38,35 +44,94 @@ app = FastAPI(title="Iron-Clad AI Gateway", version="1.0.0")
 async def startup_event():
     """Initialize database on startup."""
     await init_database()
-    print("Database initialized")
+    logger.info("Database initialized")
+
+
+def parse_llm_json_response(result_raw: str) -> dict:
+    """
+    Robust JSON parsing for LLM responses with fallback handling.
+
+    Issue 2 fix: Handles markdown-wrapped JSON, malformed JSON, and non-JSON responses.
+
+    Args:
+        result_raw: Raw LLM response (string or dict)
+
+    Returns:
+        Parsed dict with at minimum {"leaked": bool, "reason": str}
+    """
+    try:
+        # If already a dict, return as-is
+        if isinstance(result_raw, dict):
+            return result_raw
+
+        # Clean markdown wrappers
+        clean_json = result_raw.strip()
+        clean_json = re.sub(r'^```json\s*', '', clean_json)
+        clean_json = re.sub(r'\s*```$', '', clean_json)
+        clean_json = clean_json.strip()
+
+        # Parse JSON
+        result = json.loads(clean_json)
+
+        # Validate expected structure
+        if not isinstance(result, dict) or "leaked" not in result:
+            return {"leaked": False, "reason": "Invalid response structure", "error": "malformed_response"}
+
+        return result
+
+    except json.JSONDecodeError as e:
+        logger.error(f"JSON parsing failed: {e}, raw: {result_raw[:200]}")
+        return {"leaked": False, "reason": "JSON parse error", "error": str(e)}
+
+    except Exception as e:
+        logger.error(f"Unexpected error parsing LLM response: {e}")
+        return {"leaked": False, "reason": "Unexpected parsing error", "error": str(e)}
 
 
 async def audit_redaction_task(redacted_text: str, token_mapping_keys: list):
     """
-    This runs in the background. It asks the LLM to find leaks.
-    If a leak is found, it nukes the Redis record.
+    Background task for LLM-based PII leak detection.
+
+    Issue 14 fix: Specific exception handling with structured logging.
     """
     try:
         result_raw = await verifier.check_for_leaks(redacted_text)
-        
-        # Robust JSON parsing (LLMs sometimes wrap JSON in markdown blocks)
-        if isinstance(result_raw, str):
-            # Clean markdown if present
-            clean_json = result_raw.replace("```json", "").replace("```", "").strip()
-            result = json.loads(clean_json)
-        else:
-            result = result_raw
+
+        # Issue 2 fix: Use robust JSON parser
+        result = parse_llm_json_response(result_raw)
 
         if result.get("leaked"):
             AUDITOR_LEAK_DETECTIONS.inc() # Update our health dashboard
-            print(f"SECURITY ALERT: LLM found a leak: {result.get('reason')}")
-            
-            for key in token_mapping_keys:
-                redactor.db.delete(key)
-            print(f"PURGE COMPLETE: Removed {len(token_mapping_keys)} keys from Redis.")
-            
+            logger.warning(f"SECURITY ALERT: LLM detected PII leak: {result.get('reason')}")
+
+            # Purge leaked tokens
+            try:
+                purged_count = 0
+                for key in token_mapping_keys:
+                    if redactor.db.delete(key):
+                        purged_count += 1
+                        redactor.db.delete(f"{key}:policy")
+
+                logger.info(f"Purged {purged_count}/{len(token_mapping_keys)} Redis keys")
+            except redis.RedisError as e:
+                logger.error(f"Failed to purge Redis keys after leak: {e}")
+        else:
+            logger.debug("LLM audit passed - no leaks detected")
+
+    except httpx.TimeoutException as e:
+        logger.error(
+            f"LLM verification timeout ({settings.ollama_timeout}s) - audit incomplete",
+            exc_info=e
+        )
+
+    except httpx.ConnectError as e:
+        logger.error(f"Cannot connect to Ollama service at {settings.ollama_url}", exc_info=e)
+
+    except redis.RedisError as e:
+        logger.error(f"Redis error during audit task", exc_info=e)
+
     except Exception as e:
-        print(f"Error in background audit: {e}")
+        logger.exception(f"Unexpected error in background audit", exc_info=e)
 
 @app.post("/redact")
 async def redact_data(request: RedactRequest, background_tasks: BackgroundTasks):
@@ -143,11 +208,8 @@ async def restore_data(
     user_agent = request.headers.get("user-agent")
 
     try:
-        # Attempt restoration
-        original = redactor.restore(body.redacted_text, check_policy=True)
-
-        # Count tokens
-        tokens_restored = len(re.findall(r"\[REDACTED_[a-z0-9]+\]", body.redacted_text))
+        # Attempt restoration (Issue 4: returns dict with warnings)
+        result = redactor.restore(body.redacted_text, check_policy=True)
 
         # Log success
         await log_restoration_request(
@@ -155,7 +217,7 @@ async def restore_data(
             request_id=request_id,
             api_key_record=api_key_record,
             redacted_text=body.redacted_text,
-            restored_text=original,
+            restored_text=result["restored_text"],
             success=True,
             ip_address=ip_address,
             user_agent=user_agent
@@ -163,8 +225,10 @@ async def restore_data(
 
         return RestoreResponse(
             request_id=request_id,
-            original_text=original,
-            tokens_restored=tokens_restored,
+            original_text=result["restored_text"],
+            tokens_restored=result["tokens_found"],
+            tokens_missing=len(result["tokens_missing"]),
+            warnings=result["warnings"],
             audit_logged=True
         )
 
@@ -356,3 +420,83 @@ async def get_audit_log(
 @app.get("/metrics")
 def get_metrics():
     return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+
+
+# ============================================================================
+# Health Check Endpoints (Issue 10)
+# ============================================================================
+
+@app.get("/health")
+async def health_check(session: AsyncSession = Depends(get_session)):
+    """
+    Health check endpoint for Kubernetes liveness/readiness probes.
+
+    Checks:
+    - API server (implicit)
+    - Redis connection
+    - PostgreSQL connection
+    - Ollama service (degraded only, not critical)
+
+    Returns:
+        200 OK: All critical systems healthy
+        503 Service Unavailable: Critical system down
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now(UTC).isoformat(),
+        "version": settings.api_version,
+        "checks": {}
+    }
+
+    # Check Redis (critical)
+    try:
+        redactor.db.ping()
+        health_status["checks"]["redis"] = {"status": "healthy"}
+    except Exception as e:
+        logger.error(f"Redis health check failed: {e}")
+        health_status["checks"]["redis"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "unhealthy"
+
+    # Check PostgreSQL (critical)
+    try:
+        await session.execute(select(1))
+        health_status["checks"]["postgres"] = {"status": "healthy"}
+    except Exception as e:
+        logger.error(f"PostgreSQL health check failed: {e}")
+        health_status["checks"]["postgres"] = {"status": "unhealthy", "error": str(e)}
+        health_status["status"] = "unhealthy"
+
+    # Check Ollama (non-critical - degraded only)
+    try:
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            response = await client.get(settings.ollama_url.replace("/api/generate", "/api/tags"))
+            if response.status_code == 200:
+                health_status["checks"]["ollama"] = {"status": "healthy"}
+            else:
+                health_status["checks"]["ollama"] = {"status": "degraded", "note": "LLM unavailable"}
+    except Exception:
+        health_status["checks"]["ollama"] = {"status": "degraded", "note": "LLM unavailable"}
+
+    # Return appropriate status code
+    if health_status["status"] == "unhealthy":
+        raise HTTPException(status_code=503, detail=health_status)
+
+    return health_status
+
+
+@app.get("/health/live")
+async def liveness_probe():
+    """Kubernetes liveness probe - API is alive."""
+    return {"status": "alive"}
+
+
+@app.get("/health/ready")
+async def readiness_probe(session: AsyncSession = Depends(get_session)):
+    """Kubernetes readiness probe - ready to accept traffic."""
+    try:
+        redactor.db.ping()
+        await session.execute(select(1))
+        return {"status": "ready"}
+    except Exception as e:
+        logger.error(f"Readiness check failed: {e}")
+        raise HTTPException(status_code=503, detail={"status": "not_ready", "error": str(e)})

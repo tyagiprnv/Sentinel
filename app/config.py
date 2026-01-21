@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     api_version: str = "1.0.0"
     api_debug: bool = False
 
+    # Logging Configuration (Issue 9)
+    log_level: str = "INFO"
+
     # Monitoring
     enable_metrics: bool = True
     enable_tracing: bool = False
@@ -88,6 +91,7 @@ class Settings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = False
+        extra = "ignore"  # Ignore extra fields in .env file
 
 
 # Global settings instance
