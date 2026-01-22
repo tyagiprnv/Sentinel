@@ -24,16 +24,19 @@ class VerificationAgent:
         self.timeout = self.settings.ollama_timeout
         self.prompt_version = self.settings.prompt_version
 
-    async def check_for_leaks(self, redacted_text: str, prompt_version: str = None) -> dict:
+    async def check_for_leaks(self, redacted_text: str, prompt_version: str = None, risk_mode: bool = False) -> dict:
         """
         Check redacted text for PII leaks using LLM.
 
         Args:
             redacted_text: Text that has been redacted
             prompt_version: Optional prompt version override (v1_basic, v2_cot, v3_few_shot)
+            risk_mode: If True, return risk scores instead of boolean leaked status
 
         Returns:
-            Dictionary with 'leaked' (bool), 'reason' (str), and optional 'error'
+            If risk_mode=False: Dictionary with 'leaked' (bool), 'reason' (str), and optional 'error'
+            If risk_mode=True: Dictionary with 'risk_score' (float), 'risk_factors' (list),
+                               'recommended_action' (str), 'confidence' (float)
         """
         # Use specified version or default from config
         version = prompt_version or self.prompt_version
@@ -42,6 +45,7 @@ class VerificationAgent:
         prompt = get_prompt(
             version=version,
             text=redacted_text,
+            risk_mode=risk_mode,
             num_examples=self.settings.few_shot_examples_count
         )
 

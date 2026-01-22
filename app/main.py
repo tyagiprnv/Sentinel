@@ -3,12 +3,13 @@ from fastapi import FastAPI, Response, BackgroundTasks, HTTPException, Depends, 
 from app.schemas import (
     RedactRequest, RedactResponse, RestoreRequest, RestoreResponse,
     APIKeyCreateRequest, APIKeyCreateResponse, APIKeyListResponse, APIKeyInfo,
-    AuditLogResponse, AuditLogEntry
+    AuditLogResponse, AuditLogEntry, PolicySuggestionRequest, PolicySuggestionResponse
 )
 from app.policy_schemas import PolicyResponse, AvailablePoliciesResponse
 from app.verification import verifier
 from app.service import redactor
 from app.policies import PolicyEngine, GENERAL_POLICY, HEALTHCARE_POLICY, FINANCE_POLICY
+from app.policy_recommendation import policy_recommender
 from app.config import get_settings
 from app.database import get_session, init_database, APIKey as APIKeyModel
 from app.auth import validate_api_key, generate_api_key
@@ -31,11 +32,27 @@ logger = get_logger("api")
 policy_engine = PolicyEngine()
 settings = get_settings()
 
-# NEW METRIC: Track how many times the Auditor finds a leak
+# Legacy Metrics
 AUDITOR_LEAK_DETECTIONS = Counter("auditor_leaks_found_total", "Number of PII leaks caught by the LLM Auditor")
-
 REDACTION_COUNT = Counter("total_redactions", "Number of redactions performed")
 CONFIDENCE_HISTOGRAM = Histogram("model_confidence_scores", "Distribution of model confidence", buckets=[0, 0.5, 0.7, 0.8, 0.9, 1.0])
+
+# Risk Scoring Metrics
+RISK_SCORE_HISTOGRAM = Histogram(
+    "auditor_risk_scores",
+    "Distribution of risk scores from LLM auditor",
+    buckets=[0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+)
+RISK_ACTIONS_COUNTER = Counter(
+    "auditor_risk_actions_total",
+    "Count of risk-based actions taken",
+    ["action"]  # Labels: allow, alert, purge
+)
+RISK_CONFIDENCE_HISTOGRAM = Histogram(
+    "auditor_risk_confidence",
+    "Confidence scores for risk assessments",
+    buckets=[0.0, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0]
+)
 
 app = FastAPI(title="Iron-Clad AI Gateway", version="1.0.0")
 
@@ -90,18 +107,79 @@ def parse_llm_json_response(result_raw: str) -> dict:
 
 async def audit_redaction_task(redacted_text: str, token_mapping_keys: list):
     """
-    Background task for LLM-based PII leak detection.
+    Background task for LLM-based PII leak detection with risk scoring.
 
-    Issue 14 fix: Specific exception handling with structured logging.
+    Supports both legacy boolean mode and new risk scoring mode based on configuration.
     """
     try:
-        result_raw = await verifier.check_for_leaks(redacted_text)
+        # Use risk scoring mode if enabled, otherwise legacy boolean mode
+        use_risk_mode = settings.enable_risk_scoring
 
-        # Issue 2 fix: Use robust JSON parser
+        result_raw = await verifier.check_for_leaks(redacted_text, risk_mode=use_risk_mode)
+
+        # Parse JSON response
         result = parse_llm_json_response(result_raw)
 
-        if result.get("leaked"):
-            AUDITOR_LEAK_DETECTIONS.inc() # Update our health dashboard
+        # Handle risk scoring mode
+        if use_risk_mode and "risk_score" in result:
+            risk_score = result.get("risk_score", 0.0)
+            risk_factors = result.get("risk_factors", [])
+            recommended_action = result.get("recommended_action", "allow")
+            confidence = result.get("confidence", 0.0)
+
+            # Record metrics
+            RISK_SCORE_HISTOGRAM.observe(risk_score)
+            RISK_CONFIDENCE_HISTOGRAM.observe(confidence)
+
+            logger.info(
+                f"Risk analysis complete: score={risk_score:.2f}, "
+                f"action={recommended_action}, confidence={confidence:.2f}"
+            )
+
+            # Tiered response based on risk thresholds
+            if risk_score >= settings.risk_threshold_purge:
+                # CRITICAL RISK: Purge keys immediately
+                AUDITOR_LEAK_DETECTIONS.inc()
+                RISK_ACTIONS_COUNTER.labels(action="purge").inc()
+                logger.error(
+                    f"CRITICAL RISK (score={risk_score:.2f}): Purging keys. "
+                    f"Factors: {', '.join(risk_factors)}"
+                )
+
+                try:
+                    purged_count = 0
+                    for key in token_mapping_keys:
+                        if redactor.db.delete(key):
+                            purged_count += 1
+                            redactor.db.delete(f"{key}:policy")
+
+                    logger.info(f"Purged {purged_count}/{len(token_mapping_keys)} Redis keys")
+                except redis.RedisError as e:
+                    logger.error(f"Failed to purge Redis keys after critical risk: {e}")
+
+            elif risk_score >= settings.risk_threshold_alert:
+                # HIGH RISK: Alert but don't purge
+                RISK_ACTIONS_COUNTER.labels(action="alert").inc()
+                logger.warning(
+                    f"HIGH RISK ALERT (score={risk_score:.2f}): {recommended_action}. "
+                    f"Factors: {', '.join(risk_factors)}"
+                )
+
+            elif risk_score >= settings.risk_threshold_log:
+                # MEDIUM RISK: Log for investigation
+                RISK_ACTIONS_COUNTER.labels(action="allow").inc()
+                logger.info(
+                    f"Medium risk detected (score={risk_score:.2f}): {', '.join(risk_factors)}"
+                )
+
+            else:
+                # LOW RISK: All good
+                RISK_ACTIONS_COUNTER.labels(action="allow").inc()
+                logger.debug(f"Low risk (score={risk_score:.2f}) - audit passed")
+
+        # Handle legacy boolean mode
+        elif result.get("leaked"):
+            AUDITOR_LEAK_DETECTIONS.inc()
             logger.warning(f"SECURITY ALERT: LLM detected PII leak: {result.get('reason')}")
 
             # Purge leaked tokens
@@ -287,6 +365,49 @@ async def get_available_policies():
         default_context=settings.default_policy_context,
         policies=policies_detail
     )
+
+
+@app.post("/suggest-policy", response_model=PolicySuggestionResponse)
+async def suggest_policy(request: PolicySuggestionRequest):
+    """
+    Suggest the most appropriate policy context for given text using LLM analysis.
+
+    This GenAI-powered endpoint analyzes text content to recommend:
+    - Healthcare policy for PHI (Protected Health Information)
+    - Finance policy for PCI-DSS compliance (credit cards, bank accounts)
+    - General policy for other use cases
+
+    Args:
+        request: Text to analyze
+
+    Returns:
+        Policy recommendation with confidence score and reasoning
+    """
+    logger.info(f"Policy suggestion requested for text length: {len(request.text)}")
+
+    try:
+        # Use LLM-based policy recommendation service
+        result = await policy_recommender.suggest_policy(request.text)
+
+        logger.info(
+            f"Policy suggested: {result['recommended_context']} "
+            f"(confidence: {result['confidence']:.2f})"
+        )
+
+        return PolicySuggestionResponse(**result)
+
+    except Exception as e:
+        logger.error(f"Policy suggestion failed: {e}", exc_info=e)
+
+        # Return safe default on error
+        return PolicySuggestionResponse(
+            recommended_context="general",
+            confidence=0.5,
+            reasoning=f"Error during analysis, defaulting to general policy: {str(e)}",
+            detected_domains=["general"],
+            alternative_contexts=[],
+            risk_warning=None
+        )
 
 
 # ============================================================================

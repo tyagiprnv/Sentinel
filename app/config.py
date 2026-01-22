@@ -27,9 +27,15 @@ class Settings(BaseSettings):
     presidio_language: str = "en"
 
     # LLM Prompt Configuration
-    prompt_version: str = "v3_few_shot"  # Options: v1_basic, v2_cot, v3_few_shot
+    prompt_version: str = "v3_few_shot"  # Options: v1_basic, v2_cot, v3_few_shot, v4_optimized
     use_chain_of_thought: bool = True
     few_shot_examples_count: int = 3
+
+    # Risk Scoring Configuration
+    enable_risk_scoring: bool = True  # Use risk scores instead of boolean leak detection
+    risk_threshold_purge: float = 0.7  # Purge keys immediately if risk >= this threshold
+    risk_threshold_alert: float = 0.5  # Send alert if risk >= this threshold
+    risk_threshold_log: float = 0.3    # Log for investigation if risk >= this threshold
 
     # API Configuration
     api_title: str = "Sentinel - AI-Powered PII Protection"

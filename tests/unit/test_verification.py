@@ -243,3 +243,171 @@ class TestVerificationAgent:
 
             result_raw = await verification_agent.check_for_leaks(redacted_text)
             assert result_raw is not None
+
+    # ========================================================================
+    # Risk Scoring Tests (GenAI Enhancement)
+    # ========================================================================
+
+    @pytest.mark.asyncio
+    async def test_risk_scoring_low_risk(self, verification_agent):
+        """Test risk scoring mode with low risk text."""
+        redacted_text = "Contact [REDACTED_a1b2c3] at [REDACTED_d4e5f6]"
+
+        with respx.mock:
+            # Mock risk scoring response
+            respx.post("http://ollama:11434/api/generate").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "response": json.dumps({
+                            "risk_score": 0.15,
+                            "risk_factors": ["All PII properly tokenized", "No visible identifiers"],
+                            "recommended_action": "allow",
+                            "confidence": 0.95
+                        })
+                    }
+                )
+            )
+
+            result_raw = await verification_agent.check_for_leaks(redacted_text, risk_mode=True)
+
+            # Parse result
+            if isinstance(result_raw, str):
+                result = json.loads(result_raw)
+            else:
+                result = result_raw
+
+            assert result["risk_score"] == 0.15
+            assert result["recommended_action"] == "allow"
+            assert result["confidence"] == 0.95
+            assert len(result["risk_factors"]) > 0
+
+    @pytest.mark.asyncio
+    async def test_risk_scoring_medium_risk(self, verification_agent):
+        """Test risk scoring mode with medium risk text."""
+        redacted_text = "Patient [REDACTED_a1b2], DOB: [REDACTED_c3d4]"
+
+        with respx.mock:
+            # Mock medium risk response
+            respx.post("http://ollama:11434/api/generate").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "response": json.dumps({
+                            "risk_score": 0.45,
+                            "risk_factors": [
+                                "Token adjacency suggests PHI relationship",
+                                "Contextual word 'Patient' links tokens"
+                            ],
+                            "recommended_action": "allow",
+                            "confidence": 0.88
+                        })
+                    }
+                )
+            )
+
+            result_raw = await verification_agent.check_for_leaks(redacted_text, risk_mode=True)
+            result = json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+
+            assert 0.3 <= result["risk_score"] <= 0.5
+            assert result["recommended_action"] == "allow"
+            assert "Token adjacency" in result["risk_factors"][0]
+
+    @pytest.mark.asyncio
+    async def test_risk_scoring_high_risk(self, verification_agent):
+        """Test risk scoring mode with high risk text."""
+        redacted_text = "SSN: XXX-XX-1234, Phone: (555) XXX-XXXX"
+
+        with respx.mock:
+            # Mock high risk response
+            respx.post("http://ollama:11434/api/generate").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "response": json.dumps({
+                            "risk_score": 0.65,
+                            "risk_factors": [
+                                "Format preservation: SSN pattern visible",
+                                "Format preservation: Phone pattern visible",
+                                "Partial SSN exposed (last 4 digits)"
+                            ],
+                            "recommended_action": "alert",
+                            "confidence": 0.92
+                        })
+                    }
+                )
+            )
+
+            result_raw = await verification_agent.check_for_leaks(redacted_text, risk_mode=True)
+            result = json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+
+            assert 0.5 <= result["risk_score"] <= 0.7
+            assert result["recommended_action"] == "alert"
+            assert any("Format preservation" in factor for factor in result["risk_factors"])
+
+    @pytest.mark.asyncio
+    async def test_risk_scoring_critical_risk(self, verification_agent):
+        """Test risk scoring mode with critical risk (PII leak)."""
+        leaked_text = "Contact John Doe at john.doe@email.com or 555-123-4567"
+
+        with respx.mock:
+            # Mock critical risk response
+            respx.post("http://ollama:11434/api/generate").mock(
+                return_value=Response(
+                    200,
+                    json={
+                        "response": json.dumps({
+                            "risk_score": 0.95,
+                            "risk_factors": [
+                                "Direct PII leak: full name 'John Doe'",
+                                "Direct PII leak: email 'john.doe@email.com'",
+                                "Direct PII leak: phone '555-123-4567'"
+                            ],
+                            "recommended_action": "purge",
+                            "confidence": 0.98
+                        })
+                    }
+                )
+            )
+
+            result_raw = await verification_agent.check_for_leaks(leaked_text, risk_mode=True)
+            result = json.loads(result_raw) if isinstance(result_raw, str) else result_raw
+
+            assert result["risk_score"] >= 0.7
+            assert result["recommended_action"] == "purge"
+            assert any("Direct PII leak" in factor for factor in result["risk_factors"])
+
+    @pytest.mark.asyncio
+    async def test_risk_scoring_with_prompt_version_override(self, verification_agent):
+        """Test risk scoring with different prompt versions."""
+        redacted_text = "Contact [REDACTED_a1b2]"
+
+        with respx.mock:
+            request_data = None
+
+            def capture_request(request):
+                nonlocal request_data
+                request_data = json.loads(request.content)
+                return Response(
+                    200,
+                    json={
+                        "response": json.dumps({
+                            "risk_score": 0.1,
+                            "risk_factors": ["Clean"],
+                            "recommended_action": "allow",
+                            "confidence": 0.95
+                        })
+                    }
+                )
+
+            respx.post("http://ollama:11434/api/generate").mock(side_effect=capture_request)
+
+            await verification_agent.check_for_leaks(
+                redacted_text,
+                prompt_version="v4_optimized",
+                risk_mode=True
+            )
+
+            # Verify the prompt was generated (different version would have different content)
+            assert request_data is not None
+            assert "prompt" in request_data

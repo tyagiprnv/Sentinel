@@ -22,6 +22,47 @@ class RedactResponse(BaseModel):
     )
 
 
+# Risk Scoring Schemas
+
+class RiskAnalysis(BaseModel):
+    """Risk analysis result from LLM auditor."""
+    risk_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Risk score from 0.0 (no risk) to 1.0 (critical risk)"
+    )
+    risk_factors: List[str] = Field(
+        ...,
+        description="List of specific risk factors identified"
+    )
+    recommended_action: str = Field(
+        ...,
+        description="Recommended action: 'allow', 'alert', or 'purge'"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the risk assessment (0.0-1.0)"
+    )
+
+
+class RedactResponseWithRisk(BaseModel):
+    """Extended redaction response including risk analysis."""
+    original_length: int
+    redacted_text: str
+    entities_found: list[str]
+    policy_applied: Optional[PolicyResponse] = Field(
+        None,
+        description="Policy that was applied to this request"
+    )
+    risk_analysis: Optional[RiskAnalysis] = Field(
+        None,
+        description="Risk analysis from LLM auditor (available after background processing)"
+    )
+
+
 # Restoration Schemas
 
 class RestoreRequest(BaseModel):
@@ -134,3 +175,45 @@ class AuditLogResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# Policy Recommendation Schemas (GenAI Enhancement)
+
+class PolicySuggestionRequest(BaseModel):
+    """Request for policy suggestion."""
+    text: str = Field(
+        ...,
+        min_length=1,
+        example="Patient John Doe, DOB: 1990-05-15, diagnosis: hypertension",
+        description="Text to analyze for policy recommendation"
+    )
+
+
+class PolicySuggestionResponse(BaseModel):
+    """Response with policy recommendation from LLM."""
+    recommended_context: str = Field(
+        ...,
+        description="Recommended policy context (general, healthcare, finance)"
+    )
+    confidence: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        description="Confidence in the recommendation (0.0-1.0)"
+    )
+    reasoning: str = Field(
+        ...,
+        description="Explanation of why this policy was chosen"
+    )
+    detected_domains: List[str] = Field(
+        ...,
+        description="List of domains detected in the text"
+    )
+    alternative_contexts: List[str] = Field(
+        default_factory=list,
+        description="Alternative policy contexts that could be used"
+    )
+    risk_warning: Optional[str] = Field(
+        None,
+        description="Warning if text contains cross-domain PII"
+    )
