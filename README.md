@@ -1,8 +1,8 @@
 # Sentinel
 
-**Enterprise-grade PII redaction gateway with AI-powered compliance enforcement.**
+**Enterprise-grade PII redaction gateway with GenAI-powered intelligence.**
 
-Three-layer security architecture combining NLP detection, policy-based compliance (HIPAA/PCI-DSS/GDPR), and LLM verification. Production-ready with authentication, audit trails, health checks, and Docker deployment.
+Three-layer security architecture combining NLP detection, policy-based compliance (HIPAA/PCI-DSS/GDPR), and LLM risk scoring. Now with **intelligent policy recommendations** and **nuanced risk assessments** powered by GenAI.
 
 ---
 
@@ -10,30 +10,99 @@ Three-layer security architecture combining NLP detection, policy-based complian
 
 Traditional PII redaction tools lack context awareness and compliance flexibility. Sentinel solves this with:
 
-- **Compliance-First Design**: Pre-configured policies for HIPAA, PCI-DSS, and GDPR
-- **AI Verification**: LLM auditor catches context-dependent leaks missed by pattern matching
-- **Production Security**: API key authentication, immutable audit logs, policy-based restoration controls
-- **Battle-Tested**: 81% test coverage across 99 tests, 43-case benchmark suite, Kubernetes-ready health checks
+- **GenAI Intelligence**: Smart policy recommendations and risk-based scoring (0.0-1.0) instead of binary pass/fail
+- **Compliance-First Design**: Pre-configured policies for HIPAA, PCI-DSS, and GDPR with automatic domain detection
+- **Explainable AI**: Every risk assessment includes reasoning and confidence scores for audit trails
+- **Production Security**: API key authentication, immutable audit logs, tiered risk responses (purge/alert/log)
+- **Battle-Tested**: 62% test coverage across 127 tests, 43-case benchmark suite, Kubernetes-ready health checks
 
-The design choices behind Sentinel reflect real-world constraints around compliance, reliability, and operational simplicity.
+The design reflects real-world constraints around compliance, reliability, and operational simplicity—enhanced with GenAI capabilities.
+
+---
+
+## GenAI Features 🤖
+
+### 1. Smart Policy Recommendation
+
+Let AI analyze your text and suggest the optimal policy context:
+
+```bash
+# Ask AI which policy to use
+curl -X POST http://localhost:8000/suggest-policy \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Patient billing: credit card ending in 1234"}'
+
+# Response:
+{
+  "recommended_context": "finance",
+  "confidence": 0.88,
+  "reasoning": "Mixed healthcare and finance data. Finance has stricter thresholds.",
+  "detected_domains": ["healthcare", "finance"],
+  "risk_warning": "Cross-domain PII detected"
+}
+```
+
+**Use Cases:**
+- **Auto-routing**: Log pipelines automatically select policies
+- **Developer onboarding**: No need to understand policy nuances
+- **Multi-domain detection**: Handles mixed healthcare + finance data
+
+### 2. Risk-Based Scoring
+
+Replace binary leak detection with nuanced risk assessment:
+
+```bash
+# Configure risk thresholds in .env
+ENABLE_RISK_SCORING=true
+RISK_THRESHOLD_PURGE=0.7   # Critical: purge immediately
+RISK_THRESHOLD_ALERT=0.5   # High: alert security team
+RISK_THRESHOLD_LOG=0.3     # Medium: log for review
+```
+
+**Risk Scores Explained:**
+- **0.0-0.3**: Low risk (properly redacted) → allow
+- **0.3-0.5**: Medium risk (contextual clues) → log for investigation
+- **0.5-0.7**: High risk (format preservation) → alert security team
+- **0.7-1.0**: Critical risk (direct PII leak) → purge keys immediately
+
+**Response includes explainability:**
+```json
+{
+  "risk_score": 0.65,
+  "risk_factors": ["Format preservation: SSN pattern visible", "Partial SSN exposed"],
+  "recommended_action": "alert",
+  "confidence": 0.92
+}
+```
+
+**Benefits:**
+- Tune sensitivity without code changes
+- Monitor risk trends in Prometheus/Grafana
+- Explain decisions for compliance audits
+- Adaptive thresholds per use case
 
 ---
 
 ## Recent Improvements
 
+**GenAI Enhancements** (Latest):
+- Risk-based scoring system with configurable thresholds (purge/alert/log)
+- Smart policy recommendation endpoint (`/suggest-policy`)
+- Multi-domain detection for cross-policy scenarios
+- Explainable AI with reasoning and confidence scores
+- 28 new tests (127 total), 62% coverage
+
 **Security & Reliability**:
 - Token collision prevention: 16-character tokens for 18.4 quintillion unique combinations
-- Missing token tracking: Restore endpoint now reports warnings for expired/missing tokens
+- Missing token tracking: Restore endpoint reports warnings for expired tokens
 - Robust error handling: Specific exception types for timeout, connection, and Redis errors
-- Configuration-based connections: Redis settings now use environment variables
 
-**Observability & Operations**:
-- Structured logging system with module-specific loggers and configurable log levels
-- Health check endpoints for Kubernetes liveness/readiness probes
-- Singleton pattern for Presidio engines (prevents reloading 500MB NLP model)
-- Fixed deprecated `datetime.utcnow` usage (Python 3.13+ compatible)
+**Observability**:
+- Prometheus metrics for risk score distribution
+- Structured logging with configurable log levels
+- Health check endpoints for Kubernetes probes
 
-All changes are backward compatible and maintain 81% test coverage across 99 passing tests.
+All changes are backward compatible.
 
 ---
 
@@ -109,8 +178,8 @@ Sentinel prioritizes predictable behavior, clear policy control, and secure defa
          ▼                    ▼                    ▼
 ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐
 │  Layer 1:       │  │  Layer 2:       │  │  Layer 3:       │
-│  NLP Detection  │─▶│  Policy Engine  │─▶│  LLM Auditor    │
-│  (Presidio)     │  │  (Compliance)   │  │  (Phi-3)        │
+│  NLP Detection  │─▶│  Policy Engine  │─▶│  Risk Scorer    │
+│  (Presidio)     │  │  (Compliance)   │  │  (LLM)          │
 └─────────────────┘  └─────────────────┘  └─────────────────┘
          │                    │                    │
          └────────────────────┴────────────────────┘
@@ -123,7 +192,7 @@ Sentinel prioritizes predictable behavior, clear policy control, and secure defa
 
 **Layer 1: Detection** - Presidio analyzes text for 13 PII entity types (EMAIL, SSN, CREDIT_CARD, etc.)
 **Layer 2: Policy Engine** - Filters entities by compliance context, confidence thresholds, restoration permissions
-**Layer 3: Verification** - LLM auditor validates redaction quality, purges tokens if leaks detected
+**Layer 3: Risk Scorer** - LLM assigns risk scores (0.0-1.0), triggers tiered responses (purge/alert/log)
 
 ---
 
@@ -177,6 +246,20 @@ curl -X POST http://localhost:8000/restore \
 #   "tokens_missing": 0,
 #   "warnings": [],
 #   "audit_logged": true
+# }
+
+# Get AI-powered policy suggestion (GenAI feature)
+curl -X POST http://localhost:8000/suggest-policy \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Patient billing: credit card ending in 1234"}'
+
+# Response:
+# {
+#   "recommended_context": "finance",
+#   "confidence": 0.88,
+#   "reasoning": "Mixed healthcare and finance data. Finance has stricter thresholds.",
+#   "detected_domains": ["healthcare", "finance"],
+#   "risk_warning": "Cross-domain PII detected"
 # }
 ```
 
@@ -277,7 +360,7 @@ uvicorn app.main:app --reload
 
 ## Testing & Quality Assurance
 
-### Test Coverage: 81% (99/99 tests passing)
+### Test Coverage: 62% (127/127 tests passing)
 
 ```bash
 # Run full test suite with coverage
@@ -287,16 +370,23 @@ uv run pytest --cov=app --cov-report=html --cov-report=term
 uv run pytest --cov=app --cov-report=term -q
 
 # Specific test categories
-uv run pytest tests/unit/ -v           # Unit tests
-uv run pytest tests/integration/ -v    # Integration tests
+uv run pytest tests/unit/ -v           # Unit tests (71 tests)
+uv run pytest tests/integration/ -v    # Integration tests (53 tests)
 ```
 
 **Coverage Breakdown:**
-- 100% Coverage: `audit.py`, `policies.py`, `policy_schemas.py`, `schemas.py`, `service.py`
+- 100% Coverage: `policy_prompts.py`, `policy_schemas.py`, `schemas.py`
 - 94% Coverage: `logging_config.py`
-- 93% Coverage: `verification.py`
 - 91% Coverage: `database.py`
-- 65% Coverage: `main.py` (health checks and admin endpoints not fully tested)
+- 83% Coverage: `policies.py`
+- 71% Coverage: `policy_recommendation.py`
+- 70% Coverage: `verification.py`
+- 62% Coverage: Total (exceeds 60% requirement)
+
+**GenAI Test Suite:**
+- 13 unit tests for policy recommendation service
+- 10 integration tests for `/suggest-policy` endpoint
+- 5 risk scoring tests for verification agent
 
 ### Evaluation Framework
 
@@ -314,21 +404,36 @@ uv run python evaluation/baseline_comparison.py
 
 ## LLM Prompt Engineering
 
-Four prompt versions for systematic optimization:
+### Risk Scoring Prompts (GenAI)
 
-| Version | Strategy | Best Use Case |
-|---------|----------|---------------|
-| **v1_basic** | Zero-shot instruction | Baseline/fast inference |
-| **v2_cot** | Chain-of-thought reasoning | Complex edge cases |
-| **v3_few_shot** | 7 curated examples | Best accuracy (+15-20%) |
-| **v4_optimized** | Concise 2-example | Balanced speed/accuracy |
+Four prompt versions for nuanced risk assessment:
+
+| Version | Strategy | Output | Best Use Case |
+|---------|----------|--------|---------------|
+| **v1_basic** | Zero-shot instruction | Risk score + factors | Baseline/fast inference |
+| **v2_cot** | Chain-of-thought reasoning | Step-by-step analysis | Complex edge cases |
+| **v3_few_shot** | 4 risk examples (low/med/high/critical) | Best accuracy | Production use |
+| **v4_optimized** | Concise 3-example | Balanced speed/accuracy | High-throughput scenarios |
 
 **Configure in `.env`:**
 ```bash
+# Enable risk scoring mode
+ENABLE_RISK_SCORING=true
 PROMPT_VERSION=v3_few_shot
-FEW_SHOT_EXAMPLES_COUNT=3
-USE_CHAIN_OF_THOUGHT=true
+
+# Tune thresholds
+RISK_THRESHOLD_PURGE=0.7
+RISK_THRESHOLD_ALERT=0.5
+RISK_THRESHOLD_LOG=0.3
 ```
+
+### Policy Recommendation Prompt
+
+Single comprehensive prompt for domain detection:
+- Analyzes text for healthcare/finance/general indicators
+- Returns recommended context with confidence and reasoning
+- Handles multi-domain scenarios with cross-policy warnings
+- Keyword-based fallback when LLM unavailable
 
 ---
 
@@ -376,7 +481,10 @@ docker-compose exec api uv run python scripts/init_db.py
 **Prometheus Metrics** (`http://localhost:8000/metrics`):
 - `total_redactions` - Request counter
 - `model_confidence_scores` - Presidio confidence histogram
-- `auditor_leaks_found_total` - LLM leak detection counter
+- `auditor_risk_scores` - **[GenAI]** Risk score distribution (0.0-1.0)
+- `auditor_risk_actions_total` - **[GenAI]** Actions taken (allow/alert/purge)
+- `auditor_risk_confidence` - **[GenAI]** Assessment confidence scores
+- `auditor_leaks_found_total` - Legacy leak detection counter
 
 **Grafana Dashboards** (`http://localhost:3000`, admin/admin):
 - Request rate and latency
@@ -397,7 +505,8 @@ docker-compose exec api uv run python scripts/init_db.py
 - `POST /redact` - Redact PII with policy-based filtering
 - `POST /restore` - **[AUTH]** Restore original text from tokens
 - `GET /policies` - List available policy contexts
-- `GET /metrics` - Prometheus metrics
+- `POST /suggest-policy` - **[GenAI]** Get AI-powered policy recommendation
+- `GET /metrics` - Prometheus metrics (includes risk score distribution)
 
 ### Health & Monitoring
 - `GET /health` - Comprehensive health check (Redis, PostgreSQL, Ollama)
